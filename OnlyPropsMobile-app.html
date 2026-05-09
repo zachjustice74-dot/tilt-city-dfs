@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Tilt City DFS Optimizer</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<style>
+body{
+margin:0;
+background:radial-gradient(circle at top,#0b1220,#05070f);
+font-family:Arial, sans-serif;
+color:#fff;
+}
+
+.container{
+max-width:1200px;
+margin:auto;
+padding:16px;
+}
+
+h2{
+text-align:center;
+letter-spacing:2px;
+color:#00ff9d;
+text-shadow:0 0 10px rgba(0,255,157,0.5);
+}
+
+.label{
+font-size:11px;
+opacity:0.7;
+margin-top:10px;
+margin-bottom:-4px;
+text-transform:uppercase;
+letter-spacing:1px;
+}
+
+textarea,input,select,button{
+width:100%;
+padding:12px;
+margin:8px 0;
+border-radius:10px;
+border:none;
+font-size:14px;
+}
+
+button{
+background:linear-gradient(90deg,#00ff9d,#00c2ff);
+font-weight:bold;
+cursor:pointer;
+color:#000;
+box-shadow:0 0 15px rgba(0,255,157,0.3);
+}
+
+button.danger{background:#ff3b3b;color:#fff;}
+
+#status{text-align:center;margin:10px 0;opacity:0.8;}
+
+#output{
+display:grid;
+grid-template-columns:repeat(3, 1fr);
+gap:16px;
+}
+
+@media(max-width:900px){#output{grid-template-columns:repeat(2,1fr);}}
+@media(max-width:600px){#output{grid-template-columns:1fr;}}
+
+.card{
+background:#f5f5f5;
+color:#000;
+font-family:"Courier New", monospace;
+padding:14px;
+border-radius:12px;
+box-shadow:0 10px 25px rgba(0,0,0,0.5);
+position:relative;
+overflow:hidden;
+}
+
+.card:before{
+content:"";
+position:absolute;
+top:0;left:0;width:100%;height:6px;
+background:linear-gradient(90deg,#00ff9d,#00c2ff,#ff00e0);
+}
+
+.card.hr{border:2px solid #ff3b3b;box-shadow:0 0 20px rgba(255,59,59,0.3);}
+
+.slip-header{text-align:center;font-weight:bold;font-size:14px;letter-spacing:2px;}
+
+.line{border-top:1px dashed #000;margin:10px 0;}
+
+.row{display:flex;justify-content:space-between;font-size:11px;margin:3px 0;}
+
+.bold{font-weight:bold;}
+
+.badge{font-size:10px;padding:2px 6px;border-radius:4px;background:#000;color:#fff;}
+
+.barcode{text-align:center;letter-spacing:3px;font-size:16px;margin-top:8px;}
+
+</style>
+</head>
+
+<body>
+
+<div class="container">
+
+<h2>🔥 TILT CITY PRO DFS ENGINE 🔥</h2>
+
+<div class="label">slate input</div>
+<textarea id="slateInput"></textarea>
+<button onclick="parseSlate()">Parse Slate</button>
+
+<div class="label">props input</div>
+<textarea id="propsInput"></textarea>
+<button onclick="parseUserProps()">Load Props</button>
+
+<div id="status">Slate: 0 | Props: 0</div>
+
+<div class="label">hr bias</div>
+<input id="hrBias" type="number" value="1.2" step="0.05">
+
+<div class="label">legs</div>
+<select id="legs">
+<option value="2">2 Leg</option>
+<option value="3" selected>3 Leg</option>
+<option value="4">4 Leg</option>
+</select>
+
+<div class="label">slips</div>
+<input id="count" type="number" value="9">
+
+<button onclick="generateSlips()">Generate Slips</button>
+<button class="danger" onclick="resetAll()">Reset</button>
+
+<div id="output"></div>
+
+</div>
+
+<script>
+
+let slate={hitters:[],pitchers:{},playerMap:{}};
+let userProps=[];
+
+function oddsToProb(o){return o>0?100/(o+100):Math.abs(o)/(Math.abs(o)+100)}
+
+function cleanName(name){
+  return name.toLowerCase().replace(/[^a-z0-9]/g,'').trim();
+}
+
+function parseSlate(){
+slate={hitters:[],pitchers:{},playerMap:{}};
+let lines=document.getElementById("slateInput").value.split("\n").map(l=>l.trim()).filter(Boolean);
+let currentPitcher="";
+
+for(let line of lines){
+
+if(line.includes("vs") && line.includes("$")){
+let pitcherName=line.split("vs")[1].split("$")[0].trim();
+currentPitcher=pitcherName;
+slate.pitchers[cleanName(pitcherName)]={kPct:0.22,hrPct:0.03};
+continue;
+}
+
+if(line.includes("K%") && currentPitcher){
+let k=line.match(/(\d+\.?\d*)%/);
+if(k) slate.pitchers[cleanName(currentPitcher)].kPct=parseFloat(k[1])/100;
+}
+
+if(line.includes("HR%") && currentPitcher){
+let h=line.match(/(\d+\.?\d*)%/);
+if(h) slate.pitchers[cleanName(currentPitcher)].hrPct=parseFloat(h[1])/100;
+}
+
+let odds=line.match(/([+-]\d{2,4})/);
+if(!odds) continue;
+
+let player=line.split("$")[0].replace(/([+-]\d{2,4})/g," ").trim();
+let lower=line.toLowerCase();
+
+let avg=0.25,iso=0.15;
+let nums=line.match(/\d+\.\d+/g)||[];
+if(nums.length>=2){avg=parseFloat(nums[0]);iso=parseFloat(nums[1]);}
+
+let stat="H";
+if(lower.includes("home run")) stat="HR";
+else if(lower.includes("total bases")) stat="TB";
+else if(lower.includes("strikeout")) stat="K";
+
+slate.hitters.push({
+player,
+key:cleanName(player),
+odds:+odds[1],
+stat,
+avg,iso,
+pitcher:cleanName(currentPitcher)
+});
+
+slate.playerMap[cleanName(player)]={pitcher:cleanName(currentPitcher)};
+}
+updateStatus();
+}
+
+function parseUserProps(){
+userProps=[];
+let lines=document.getElementById("propsInput").value.split("\n").map(l=>l.trim()).filter(Boolean);
+for(let line of lines){
+let m=line.match(/^(.*?)\s+([ou])(\d+(?:\.\d+)?)\s+(.+?)\s+\(([-+]?\d+)/i);
+if(!m) continue;
+
+let player=m[1];
+let link=slate.playerMap[cleanName(player)]||{};
+
+userProps.push({
+player,
+key:cleanName(player),
+side:m[2],
+line:+m[3],
+stat:m[4],
+odds:+m[5],
+baseProb:oddsToProb(+m[5]),
+pitcher:link.pitcher
+});
+}
+updateStatus();
+}
+
+function project(p){
+let h=slate.hitters.find(x=>x.key===p.key);
+if(!h) return p.baseProb;
+let pitcher=slate.pitchers[h.pitcher]||{kPct:0.22,hrPct:0.03};
+let pa=4;
+
+let hrRate=(h.iso*2.2)*(1+pitcher.hrPct*2);
+let hitRate=h.avg;
+let kRate=pitcher.kPct;
+
+let prob=p.baseProb;
+
+if(p.stat.includes("home run")){
+prob=1-Math.pow(1-hrRate,pa);
+}
+else if(p.stat.includes("total bases")){
+prob=(hitRate*2+h.iso);
+}
+else if(p.stat.includes("strikeout")){
+prob=kRate;
+}
+
+return Math.max(0.25,Math.min(prob,0.92));
+}
+
+function simulate(combo){
+let w=0;
+for(let i=0;i<500;i++){
+let ok=true;
+for(let p of combo){if(Math.random()>project(p)){ok=false;break}}
+if(ok) w++;
+}
+return w/500;
+}
+
+function generateSlips(){
+let out=document.getElementById("output");out.innerHTML="";
+let n=+document.getElementById("count").value;
+let size=+document.getElementById("legs").value;
+
+for(let i=0;i<n;i++){
+let pool=[...userProps];
+let combo=[];
+for(let j=0;j<size;j++){
+let pick=pool[Math.floor(Math.random()*pool.length)];combo.push(pick);pool=pool.filter(x=>x!==pick);
+}
+let win=simulate(combo);
+let id=Math.floor(Math.random()*999999);
+let time=new Date().toLocaleString();
+
+let div=document.createElement("div");
+div.className="card";
+
+div.innerHTML=`
+<div class='slip-header'>🎟 TILT CITY SLIP</div>
+<div class='row'><span>ID ${id}</span><span>${time}</span></div>
+<div class='line'></div>
+${combo.map(p=>`
+<div class='row'><span class='bold'>${p.player}</span><span>${p.side}${p.line} ${p.stat}</span></div>
+<div class='row'><span>${p.odds}</span></div>
+`).join('')}
+<div class='line'></div>
+<div class='row'><span>WIN</span><span>${(win*100).toFixed(1)}%</span></div>
+<div class='row'><span>CASH OUT</span><span>${(win*0.85*100).toFixed(1)}%</span></div>
+`;
+
+out.appendChild(div);
+}
+}
+
+function resetAll(){slate={hitters:[],pitchers:{},playerMap:{}};userProps=[];document.getElementById("output").innerHTML="";updateStatus();}
+function updateStatus(){document.getElementById("status").innerHTML=`Slate: ${slate.hitters.length} | Props: ${userProps.length}`}
+
+</script>
+
+</body>
+</html>
